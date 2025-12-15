@@ -88,13 +88,6 @@ print_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
 
-# Check if running as root
-check_not_root() {
-    if [ "$EUID" -eq 0 ]; then 
-        print_error "Please do not run as root. Run as ubuntu user with sudo privileges."
-        exit 1
-    fi
-}
 
 ################################################################################
 # Prerequisites Check
@@ -627,7 +620,6 @@ main() {
     fi
     
     # Run deployment steps
-    check_not_root
     check_prerequisites
     backup_current_deployment
     deploy_backend
