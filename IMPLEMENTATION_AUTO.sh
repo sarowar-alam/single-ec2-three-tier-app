@@ -98,10 +98,19 @@ check_prerequisites() {
     
     local errors=0
     
+    # Load NVM if it exists
+    if [ -s "$HOME/.nvm/nvm.sh" ]; then
+        print_info "Loading NVM..."
+        export NVM_DIR="$HOME/.nvm"
+        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+        [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+    fi
+    
     # Check Node.js
     if ! command -v node &> /dev/null; then
         print_error "Node.js is not installed"
         print_info "Install with: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash"
+        print_info "Then run: nvm install --lts && nvm use --lts"
         ((errors++))
     else
         print_success "Node.js $(node -v) found"
