@@ -1,0 +1,15 @@
+{
+  "name": "calculator-tests",
+  "version": "1.0.0",
+  "description": "Simple calculator with automated tests",
+  "main": "calculator.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "keywords": ["calculator", "testing", "ci"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "jest": "^29.5.0"
+  }
+}

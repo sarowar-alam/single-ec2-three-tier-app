@@ -1,0 +1,31 @@
+name: Hello World Pipeline
+
+# Trigger: Run on every push to any branch
+on: [push]
+
+# Jobs to run
+jobs:
+  say-hello:
+    # Runner: Use Ubuntu latest
+    runs-on: ubuntu-latest
+    
+    # Steps to execute
+    steps:
+      # Step 1: Print a message
+      - name: Say Hello
+        run: echo "Hello from GitHub Actions!"
+      
+      # Step 2: Print system info
+      - name: Print System Info
+        run: |
+          echo "Runner OS: ${{ runner.os }}"
+          echo "Repository: ${{ github.repository }}"
+          echo "Branch: ${{ github.ref }}"
+          echo "Event: ${{ github.event_name }}"
+          date
+          
+      # Step 3: Print environment
+      - name: Print Environment
+        run: |
+          echo "GitHub Actions is awesome!"
+          echo "This workflow was triggered by: ${{ github.actor }}"

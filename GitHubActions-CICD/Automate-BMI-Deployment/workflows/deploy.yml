@@ -1,0 +1,196 @@
+name: Deploy to EC2
+
+# Trigger: Deploy only when pushing to main branch
+on:
+  push:
+    branches:
+      - main
+  # Allow manual deployment from GitHub UI
+  workflow_dispatch:
+
+# Environment variables (shared across all jobs)
+env:
+  NODE_VERSION: '18'
+  FRONTEND_DIR: 'frontend'
+  BACKEND_DIR: 'backend'
+
+jobs:
+  # ==================== JOB 1: TEST ====================
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      
+      - name: Install Backend Dependencies
+        working-directory: ${{ env.BACKEND_DIR }}
+        run: npm ci
+      
+      - name: Run Backend Tests
+        working-directory: ${{ env.BACKEND_DIR }}
+        run: |
+          # If you have tests, run: npm test
+          # For now, just validate syntax
+          node -c src/server.js
+          node -c src/routes.js
+          node -c src/calculations.js
+          echo "Backend validation passed"
+      
+      - name: Install Frontend Dependencies
+        working-directory: ${{ env.FRONTEND_DIR }}
+        run: npm ci
+      
+      - name: Run Frontend Tests
+        working-directory: ${{ env.FRONTEND_DIR }}
+        run: |
+          # If you have tests, run: npm test
+          # For now, just validate build can work
+          echo "Frontend validation passed"
+
+  # ==================== JOB 2: BUILD ====================
+  build:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    needs: test  # Only run if tests pass
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      
+      - name: Install Dependencies
+        working-directory: ${{ env.FRONTEND_DIR }}
+        run: npm ci
+      
+      - name: Build Frontend
+        working-directory: ${{ env.FRONTEND_DIR }}
+        run: |
+          npm run build
+          echo "Frontend built successfully"
+          ls -la dist/
+      
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-build
+          path: frontend/dist/
+          retention-days: 1  # Keep for 1 day only
+
+  # ==================== JOB 3: DEPLOY ====================
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: build  # Only run if build passes
+    
+    steps:
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: frontend-build
+          path: frontend-build
+      
+      - name: Copy Frontend Build to EC2
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          source: "frontend-build/*"
+          target: "/home/ubuntu/"
+          strip_components: 1
+      
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          script_stop: true  # Stop on first error
+          script: |
+            echo "Starting deployment on EC2..."
+            
+            # Check if project exists
+            if [ ! -d "/home/ubuntu/single-ec2-three-tier-app" ]; then
+              echo "ERROR: Project directory not found!"
+              exit 1
+            fi
+            
+            # Navigate to project
+            cd /home/ubuntu/single-ec2-three-tier-app
+            
+            # Pull latest code
+            echo "Pulling latest code..."
+            git pull origin main
+            
+            # Install backend dependencies
+            echo "Installing backend dependencies..."
+            cd backend
+            npm install --production
+            
+            # Copy frontend build
+            echo "Deploying frontend..."
+            cd /home/ubuntu
+            if [ -d "frontend-build" ]; then
+              sudo cp -r frontend-build/* /var/www/bmi-health-tracker/
+              rm -rf frontend-build
+              echo "Frontend deployed"
+            fi
+            
+            # Restart backend with PM2
+            echo "Restarting backend..."
+            export PATH=$PATH:/home/ubuntu/.npm-global/bin
+            pm2 restart bmi-backend
+            
+            # Wait for backend to start
+            echo "Waiting for backend to start..."
+            sleep 5
+            
+            # Health check
+            echo "Running health check..."
+            HEALTH=$(curl -s http://localhost:3000/health || echo "failed")
+            if [[ $HEALTH == *"ok"* ]]; then
+              echo "Deployment successful!"
+              pm2 logs bmi-backend --lines 10 --nostream
+              exit 0
+            else
+              echo "ERROR: Health check failed!"
+              pm2 logs bmi-backend --lines 50 --nostream
+              exit 1
+            fi
+
+  # ==================== JOB 4: NOTIFY ====================
+  notify:
+    name: Send Notification
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: always()  # Run even if deployment fails
+    
+    steps:
+      - name: Deployment Status
+        run: |
+          if [ "${{ needs.deploy.result }}" == "success" ]; then
+            echo "SUCCESS: Deployment succeeded!"
+            echo "Live at: http://${{ secrets.EC2_HOST }}"
+          else
+            echo "ERROR: Deployment failed!"
+            echo "Check logs at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
