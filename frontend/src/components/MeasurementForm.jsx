@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import api from '../api';
 
 export default function MF({ onSaved }) {
-  const [f, sf] = useState({ weightKg: 70, heightCm: 175, age: 30, sex: 'male', activity: 'moderate' });
+  const getTodayDate = () => new Date().toISOString().split('T')[0];
+  const [f, sf] = useState({ weightKg: 70, heightCm: 175, age: 30, sex: 'male', activity: 'moderate', measurementDate: getTodayDate() });
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -28,6 +29,20 @@ export default function MF({ onSaved }) {
     <form onSubmit={sub}>
       {error && <div className="alert alert-error">{error}</div>}
       {success && <div className="alert alert-success">Measurement saved successfully!</div>}
+      
+      <div className="form-row">
+        <div className="form-group">
+          <label htmlFor="measurementDate">Measurement Date</label>
+          <input 
+            id="measurementDate"
+            type="date"
+            value={f.measurementDate} 
+            onChange={e => sf({ ...f, measurementDate: e.target.value })}
+            required
+            max={new Date().toISOString().split('T')[0]}
+          />
+        </div>
+      </div>
       
       <div className="form-row">
         <div className="form-group">

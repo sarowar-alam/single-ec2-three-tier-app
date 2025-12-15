@@ -83,7 +83,7 @@ export default function App() {
                 rows.slice(0, 10).map(r => (
                   <li key={r.id} className="measurement-item">
                     <span className="measurement-date">
-                      {new Date(r.created_at).toLocaleDateString('en-US', { 
+                      {new Date(r.measurement_date || r.created_at).toLocaleDateString('en-US', { 
                         month: 'short', 
                         day: 'numeric', 
                         year: 'numeric' 

@@ -15,10 +15,12 @@ CREATE TABLE IF NOT EXISTS measurements (
   bmi_category VARCHAR(30),
   bmr INTEGER,
   daily_calories INTEGER,
+  measurement_date DATE NOT NULL DEFAULT CURRENT_DATE,
   created_at TIMESTAMPTZ DEFAULT now() NOT NULL
 );
 
 -- Create indexes for better query performance
+CREATE INDEX IF NOT EXISTS idx_measurements_measurement_date ON measurements(measurement_date DESC);
 CREATE INDEX IF NOT EXISTS idx_measurements_created_at ON measurements(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_measurements_bmi ON measurements(bmi);
 
@@ -33,6 +35,7 @@ COMMENT ON COLUMN measurements.bmi IS 'Body Mass Index';
 COMMENT ON COLUMN measurements.bmi_category IS 'BMI category (Underweight/Normal/Overweight/Obese)';
 COMMENT ON COLUMN measurements.bmr IS 'Basal Metabolic Rate in calories';
 COMMENT ON COLUMN measurements.daily_calories IS 'Daily calorie needs based on activity';
+COMMENT ON COLUMN measurements.measurement_date IS 'Date when the measurement was taken (user-specified or current date)';
 
 -- Display confirmation
 SELECT 'Migration 001 completed successfully - measurements table created' AS status;

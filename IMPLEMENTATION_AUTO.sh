@@ -29,6 +29,13 @@ BACKUP_DIR="$HOME/bmi_deployments_backup"
 FRONTEND_DIR="/var/www/bmi-health-tracker"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
+# Database Configuration (will be set by user input)
+DB_NAME="bmidb"
+DB_USER="bmi_user"
+DB_PASSWORD=""
+DB_HOST="localhost"
+DB_PORT="5432"
+
 # Parse command line arguments
 SKIP_NGINX=false
 SKIP_BACKUP=false
@@ -88,6 +95,173 @@ print_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
 
+################################################################################
+# Get EC2 Public IP (IMDSv2)
+################################################################################
+
+get_ec2_public_ip() {
+    # Try to get token for IMDSv2
+    local TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
+        -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" \
+        --connect-timeout 2 2>/dev/null)
+    
+    if [ -n "$TOKEN" ]; then
+        # Use IMDSv2 with token
+        local PUBLIC_IP=$(curl -s \
+            -H "X-aws-ec2-metadata-token: $TOKEN" \
+            --connect-timeout 2 \
+            http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null)
+    else
+        # Fallback to IMDSv1
+        local PUBLIC_IP=$(curl -s --connect-timeout 2 \
+            http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null)
+    fi
+    
+    # Trim whitespace and return
+    echo "$PUBLIC_IP" | tr -d '[:space:]'
+}
+
+################################################################################
+# Collect Database Credentials
+################################################################################
+
+collect_database_credentials() {
+    print_header "Database Configuration"
+    
+    echo "Please provide database credentials for the BMI Health Tracker"
+    echo ""
+    
+    # Database name
+    read -p "Database name (default: bmidb): " input_db_name
+    DB_NAME=${input_db_name:-bmidb}
+    
+    # Database user
+    read -p "Database user (default: bmi_user): " input_db_user
+    DB_USER=${input_db_user:-bmi_user}
+    
+    # Database password
+    while [ -z "$DB_PASSWORD" ]; do
+        read -sp "Database password: " DB_PASSWORD
+        echo ""
+        if [ -z "$DB_PASSWORD" ]; then
+            print_error "Password cannot be empty"
+        fi
+    done
+    
+    # Confirm password
+    read -sp "Confirm password: " DB_PASSWORD_CONFIRM
+    echo ""
+    
+    if [ "$DB_PASSWORD" != "$DB_PASSWORD_CONFIRM" ]; then
+        print_error "Passwords do not match"
+        exit 1
+    fi
+    
+    print_success "Database credentials collected"
+    echo ""
+    echo "Database Name: $DB_NAME"
+    echo "Database User: $DB_USER"
+    echo "Database Host: $DB_HOST"
+    echo "Database Port: $DB_PORT"
+    echo ""
+}
+
+################################################################################
+# Setup Database
+################################################################################
+
+setup_database() {
+    print_header "Setting Up Database"
+    
+    # Check if database exists
+    if sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw "$DB_NAME"; then
+        print_info "Database '$DB_NAME' already exists"
+    else
+        print_info "Creating database '$DB_NAME'..."
+        sudo -u postgres psql -c "CREATE DATABASE $DB_NAME;"
+        print_success "Database created"
+    fi
+    
+    # Check if user exists
+    if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'" | grep -q 1; then
+        print_info "User '$DB_USER' already exists, updating password..."
+        sudo -u postgres psql -c "ALTER USER $DB_USER WITH PASSWORD '$DB_PASSWORD';"
+        print_success "Password updated"
+    else
+        print_info "Creating user '$DB_USER'..."
+        sudo -u postgres psql -c "CREATE USER $DB_USER WITH PASSWORD '$DB_PASSWORD';"
+        print_success "User created"
+    fi
+    
+    # Grant privileges
+    print_info "Granting privileges..."
+    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;"
+    sudo -u postgres psql -d "$DB_NAME" -c "GRANT ALL ON SCHEMA public TO $DB_USER;"
+    sudo -u postgres psql -d "$DB_NAME" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO $DB_USER;"
+    print_success "Privileges granted"
+    
+    # Configure pg_hba.conf for password authentication
+    print_info "Configuring PostgreSQL authentication..."
+    PG_HBA_CONF=$(sudo -u postgres psql -t -P format=unaligned -c 'SHOW hba_file')
+    
+    # Backup pg_hba.conf
+    sudo cp "$PG_HBA_CONF" "$PG_HBA_CONF.backup_$TIMESTAMP"
+    
+    # Check if md5 authentication is already configured
+    if ! sudo grep -q "^host.*$DB_NAME.*$DB_USER.*127.0.0.1/32.*md5" "$PG_HBA_CONF"; then
+        print_info "Adding md5 authentication rule..."
+        sudo sed -i "/^# IPv4 local connections:/a host    $DB_NAME    $DB_USER    127.0.0.1/32    md5" "$PG_HBA_CONF"
+        
+        # Reload PostgreSQL
+        sudo systemctl reload postgresql
+        print_success "PostgreSQL configuration updated"
+    else
+        print_info "Authentication rule already exists"
+    fi
+    
+    # Test connection
+    print_info "Testing database connection..."
+    if PGPASSWORD=$DB_PASSWORD psql -U "$DB_USER" -d "$DB_NAME" -h localhost -c "SELECT 1;" > /dev/null 2>&1; then
+        print_success "Database connection successful"
+    else
+        print_error "Database connection failed"
+        exit 1
+    fi
+}
+
+################################################################################
+# Create Backend .env File
+################################################################################
+
+create_backend_env() {
+    print_header "Creating Backend Configuration"
+    
+    cd "$PROJECT_DIR/backend"
+    
+    # Create .env file
+    print_info "Creating .env file..."
+    cat > .env << EOF
+# Database Configuration
+DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME
+
+# Alternative individual settings
+DB_USER=$DB_USER
+DB_PASSWORD=$DB_PASSWORD
+DB_NAME=$DB_NAME
+DB_HOST=$DB_HOST
+DB_PORT=$DB_PORT
+
+# Server Configuration
+PORT=3000
+NODE_ENV=production
+
+# CORS Configuration (update with your domain)
+CORS_ORIGIN=*
+EOF
+    
+    chmod 600 .env
+    print_success ".env file created"
+}
 
 ################################################################################
 # Prerequisites Check
@@ -108,12 +282,36 @@ check_prerequisites() {
     
     # Check Node.js
     if ! command -v node &> /dev/null; then
-        # If NVM is installed but Node.js is not, try to install it
+        print_warning "Node.js not found. Attempting to install..."
+        
+        # If NVM is not installed, install it
+        if [ ! -s "$HOME/.nvm/nvm.sh" ]; then
+            print_info "Installing NVM..."
+            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+            
+            # Load NVM immediately after installation
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+            
+            if [ -s "$HOME/.nvm/nvm.sh" ]; then
+                print_success "NVM installed successfully"
+            else
+                print_error "Failed to install NVM"
+                ((errors++))
+            fi
+        fi
+        
+        # Now install Node.js via NVM
         if [ -s "$HOME/.nvm/nvm.sh" ]; then
-            print_warning "Node.js not found. Installing via NVM..."
+            print_info "Installing Node.js LTS via NVM..."
             source "$HOME/.nvm/nvm.sh"
             nvm install --lts
             nvm use --lts
+            nvm alias default lts/*
+            
+            # Reload to ensure Node.js is available
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
             
             if command -v node &> /dev/null; then
                 print_success "Node.js $(node -v) installed successfully"
@@ -122,9 +320,7 @@ check_prerequisites() {
                 ((errors++))
             fi
         else
-            print_error "Node.js is not installed and NVM is not found"
-            print_info "Install NVM first: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash"
-            print_info "Then reload shell and run this script again"
+            print_error "NVM installation failed, cannot install Node.js"
             ((errors++))
         fi
     else
@@ -141,27 +337,50 @@ check_prerequisites() {
     
     # Check PostgreSQL
     if ! command -v psql &> /dev/null; then
-        print_error "PostgreSQL is not installed"
-        print_info "Install with: sudo apt install -y postgresql postgresql-contrib"
-        ((errors++))
+        print_warning "PostgreSQL not found. Installing..."
+        sudo apt update -qq
+        sudo apt install -y postgresql postgresql-contrib
+        
+        if command -v psql &> /dev/null; then
+            print_success "PostgreSQL installed successfully"
+        else
+            print_error "Failed to install PostgreSQL"
+            ((errors++))
+        fi
     else
         print_success "PostgreSQL found"
     fi
     
     # Check PostgreSQL is running
     if ! sudo systemctl is-active --quiet postgresql; then
-        print_error "PostgreSQL service is not running"
-        print_info "Start with: sudo systemctl start postgresql"
-        ((errors++))
+        print_warning "PostgreSQL service is not running. Starting..."
+        sudo systemctl start postgresql
+        sudo systemctl enable postgresql
+        
+        if sudo systemctl is-active --quiet postgresql; then
+            print_success "PostgreSQL service started"
+        else
+            print_error "Failed to start PostgreSQL service"
+            ((errors++))
+        fi
     else
         print_success "PostgreSQL service is running"
     fi
     
     # Check Nginx
     if ! command -v nginx &> /dev/null; then
-        print_error "Nginx is not installed"
-        print_info "Install with: sudo apt install -y nginx"
-        ((errors++))
+        print_warning "Nginx not found. Installing..."
+        sudo apt install -y nginx
+        
+        if command -v nginx &> /dev/null; then
+            print_success "Nginx installed successfully"
+            # Start and enable Nginx
+            sudo systemctl start nginx
+            sudo systemctl enable nginx
+        else
+            print_error "Failed to install Nginx"
+            ((errors++))
+        fi
     else
         print_success "Nginx found"
     fi
@@ -224,9 +443,10 @@ backup_current_deployment() {
     
     # Backup database
     print_info "Backing up database..."
-    if [ -f "$PROJECT_DIR/backend/.env" ]; then
-        source "$PROJECT_DIR/backend/.env"
-        PGPASSWORD=$DB_PASSWORD pg_dump -U ${DB_USER:-bmi_user} -h localhost ${DB_NAME:-bmidb} > "$BACKUP_PATH/database_backup.sql" 2>/dev/null || print_warning "Database backup skipped"
+    if [ -n "$DB_PASSWORD" ] && [ -n "$DB_USER" ] && [ -n "$DB_NAME" ]; then
+        PGPASSWORD=$DB_PASSWORD pg_dump -U "$DB_USER" -h localhost "$DB_NAME" > "$BACKUP_PATH/database_backup.sql" 2>/dev/null || print_warning "Database backup skipped (database may not exist yet)"
+    else
+        print_warning "Database credentials not set, skipping backup"
     fi
     
     print_success "Backup created at: $BACKUP_PATH"
@@ -246,27 +466,12 @@ deploy_backend() {
     
     cd "$PROJECT_DIR/backend"
     
-    # Check .env file
+    # .env should already be created by create_backend_env function
     if [ ! -f .env ]; then
-        print_error ".env file not found in backend directory"
-        
-        if [ -f .env.example ]; then
-            print_info "Found .env.example. Creating .env from example..."
-            cp .env.example .env
-            print_warning "Please edit backend/.env with your database credentials"
-            print_info "Edit with: nano $PROJECT_DIR/backend/.env"
-            read -p "Press Enter after editing .env file..."
-        else
-            print_error "No .env or .env.example found"
-            exit 1
-        fi
+        print_error ".env file not found (should have been created earlier)"
+        exit 1
     fi
     print_success ".env file exists"
-    
-    # Source .env for later use
-    set -a
-    source .env
-    set +a
     
     # Clean install if fresh deployment
     if [ "$FRESH_DEPLOY" = true ]; then
@@ -285,7 +490,7 @@ deploy_backend() {
         for migration in migrations/*.sql; do
             if [ -f "$migration" ]; then
                 print_info "Applying migration: $(basename $migration)"
-                PGPASSWORD=$DB_PASSWORD psql -U ${DB_USER:-bmi_user} -d ${DB_NAME:-bmidb} -h localhost -f "$migration" || print_warning "Migration may have already been applied"
+                PGPASSWORD=$DB_PASSWORD psql -U "$DB_USER" -d "$DB_NAME" -h localhost -f "$migration" 2>&1 | grep -v "already exists" || print_warning "Migration may have already been applied"
             fi
         done
         print_success "Migrations completed"
@@ -295,11 +500,10 @@ deploy_backend() {
     
     # Test database connection
     print_info "Testing database connection..."
-    if PGPASSWORD=$DB_PASSWORD psql -U ${DB_USER:-bmi_user} -d ${DB_NAME:-bmidb} -h localhost -c "SELECT 1;" > /dev/null 2>&1; then
+    if PGPASSWORD=$DB_PASSWORD psql -U "$DB_USER" -d "$DB_NAME" -h localhost -c "SELECT 1;" > /dev/null 2>&1; then
         print_success "Database connection successful"
     else
         print_error "Database connection failed"
-        print_info "Check your .env file credentials"
         exit 1
     fi
 }
@@ -413,13 +617,26 @@ configure_nginx() {
     
     # Get server name
     print_info "Detecting server name..."
-    SERVER_NAME=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "YOUR_DOMAIN_OR_IP")
+    SERVER_NAME=$(get_ec2_public_ip)
     
-    if [ "$SERVER_NAME" != "YOUR_DOMAIN_OR_IP" ]; then
+    if [ -n "$SERVER_NAME" ] && [[ "$SERVER_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         print_success "Detected EC2 public IP: $SERVER_NAME"
     else
-        print_warning "Could not detect EC2 IP"
-        read -p "Enter your domain or EC2 public IP: " SERVER_NAME
+        print_warning "Could not detect EC2 IP automatically"
+        echo ""
+        echo "Please enter your server's public IP address or domain name."
+        echo "Examples:"
+        echo "  - 54.123.45.67 (EC2 Public IP)"
+        echo "  - example.com (Your domain)"
+        echo "  - _ (catch-all, works with any domain/IP)"
+        echo ""
+        read -p "Server name: " SERVER_NAME
+        
+        # If still empty, use catch-all
+        if [ -z "$SERVER_NAME" ]; then
+            SERVER_NAME="_"
+            print_warning "Using catch-all server name '_'"
+        fi
     fi
     
     # Create Nginx configuration
@@ -567,13 +784,11 @@ run_health_checks() {
     
     # Check database connection
     print_info "Checking database connection..."
-    cd "$PROJECT_DIR/backend"
-    source .env
-    if PGPASSWORD=$DB_PASSWORD psql -U ${DB_USER:-bmi_user} -d ${DB_NAME:-bmidb} -h localhost -c "SELECT COUNT(*) FROM measurements;" > /dev/null 2>&1; then
-        MEASUREMENT_COUNT=$(PGPASSWORD=$DB_PASSWORD psql -U ${DB_USER:-bmi_user} -d ${DB_NAME:-bmidb} -h localhost -tAc "SELECT COUNT(*) FROM measurements;")
+    if PGPASSWORD=$DB_PASSWORD psql -U "$DB_USER" -d "$DB_NAME" -h localhost -c "SELECT COUNT(*) FROM measurements;" > /dev/null 2>&1; then
+        MEASUREMENT_COUNT=$(PGPASSWORD=$DB_PASSWORD psql -U "$DB_USER" -d "$DB_NAME" -h localhost -tAc "SELECT COUNT(*) FROM measurements;")
         print_success "Database connection OK (Measurements: $MEASUREMENT_COUNT)"
     else
-        print_warning "Database connection check failed"
+        print_warning "Database connection check failed (table may not exist yet)"
     fi
 }
 
@@ -585,7 +800,10 @@ display_summary() {
     print_header "Deployment Complete!"
     
     # Get server IP
-    SERVER_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "YOUR_IP")
+    SERVER_IP=$(get_ec2_public_ip)
+    if [ -z "$SERVER_IP" ]; then
+        SERVER_IP="YOUR_IP"
+    fi
     
     echo ""
     echo -e "${GREEN}✓ Backend deployed and running with PM2${NC}"
@@ -644,7 +862,10 @@ main() {
     fi
     
     # Run deployment steps
+    collect_database_credentials
     check_prerequisites
+    setup_database
+    create_backend_env
     backup_current_deployment
     deploy_backend
     deploy_frontend
