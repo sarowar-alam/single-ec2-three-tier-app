@@ -292,5 +292,13 @@ Your BMI Health Tracker is:
 
 ---
 
-*Last Updated: December 12, 2025*  
+*Last Updated: December 15, 2025*  
 *Status: ✅ READY FOR DEPLOYMENT*
+
+---
+## 🧑‍💻 Author
+**Md. Sarowar Alam**  
+Lead DevOps Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)  
+---

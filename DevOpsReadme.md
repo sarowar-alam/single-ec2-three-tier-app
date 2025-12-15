@@ -2084,3 +2084,11 @@ If you encounter issues not covered in this guide:
 4. Fix one issue at a time
 
 Good luck with your deployment! 🚀
+
+---
+## 🧑‍💻 Author
+**Md. Sarowar Alam**  
+Lead DevOps Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)  
+---

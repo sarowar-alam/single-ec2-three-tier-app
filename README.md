@@ -1079,3 +1079,11 @@ For issues, questions, or contributions:
 **Last Updated:** December 15, 2025  
 **Version:** 2.0.0  
 **Status:** Production Ready ✅
+
+---
+## 🧑‍💻 Author
+**Md. Sarowar Alam**  
+Lead DevOps Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)  
+---

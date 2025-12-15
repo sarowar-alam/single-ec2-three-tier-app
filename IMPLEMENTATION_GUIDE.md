@@ -1135,6 +1135,14 @@ Your BMI Health Tracker application should now be running at `http://YOUR_EC2_PU
 **Last Updated:** December 15, 2025  
 **Version:** 2.0.0  
 **Compatible with:** IMPLEMENTATION_AUTO.sh v2.0.0
+
+---
+## 🧑‍💻 Author
+**Md. Sarowar Alam**  
+Lead DevOps Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)  
+---
 sudo apt install -y postgresql postgresql-contrib
 
 # Start and enable PostgreSQL service

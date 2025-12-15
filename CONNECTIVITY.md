@@ -413,3 +413,11 @@ grep -A 10 "corsOptions" backend/src/server.js
    - Timeout protection
 
 The connectivity is **production-ready** and follows best practices for 3-tier application architecture.
+
+---
+## 🧑‍💻 Author
+**Md. Sarowar Alam**  
+Lead DevOps Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)  
+---
