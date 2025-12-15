@@ -19,31 +19,134 @@
 
 ## 🚀 Pre-Session Setup
 
-### Step 1: Create GitHub Repository
+### Step 1: Setup SSH for GitHub (Required for Private Repos)
+
+**Why SSH?** SSH keys provide secure authentication without passwords, essential for private repositories.
+
+#### 1.1: Generate SSH Key Pair
+
+```bash
+# Check if you already have SSH keys
+ls -la ~/.ssh
+# Look for: id_rsa and id_rsa.pub (or id_ed25519 and id_ed25519.pub)
+
+# If no keys exist, generate new SSH key pair
+ssh-keygen -t ed25519 -C "your_email@example.com"
+# Press Enter to accept default location (~/.ssh/id_ed25519)
+# Enter passphrase (optional but recommended)
+
+# Alternative for older systems (use RSA)
+ssh-keygen -t rsa -b 4096 -C "your_email@example.com"
+```
+
+#### 1.2: Add SSH Key to SSH Agent
+
+```bash
+# Start SSH agent in background
+eval "$(ssh-agent -s)"
+
+# Add your SSH private key to the agent
+ssh-add ~/.ssh/id_ed25519
+# Or for RSA: ssh-add ~/.ssh/id_rsa
+
+# Verify key is added
+ssh-add -l
+```
+
+#### 1.3: Copy SSH Public Key
+
+```bash
+# Display your public key
+cat ~/.ssh/id_ed25519.pub
+# Or for RSA: cat ~/.ssh/id_rsa.pub
+
+# Copy the entire output (starts with ssh-ed25519 or ssh-rsa)
+```
+
+**On Windows (PowerShell):**
+```powershell
+# Copy to clipboard directly
+Get-Content ~/.ssh/id_ed25519.pub | Set-Clipboard
+```
+
+#### 1.4: Add SSH Key to GitHub
+
+1. Go to GitHub.com → **Settings** (click your profile picture)
+2. Click **SSH and GPG keys** in left sidebar
+3. Click **New SSH key** button
+4. **Title:** Give it a name (e.g., "My Laptop" or "Work PC")
+5. **Key type:** Authentication Key
+6. **Key:** Paste your public key (from step 1.3)
+7. Click **Add SSH key**
+8. Confirm with your GitHub password if prompted
+
+#### 1.5: Test SSH Connection
+
+```bash
+# Test connection to GitHub
+ssh -T git@github.com
+
+# Expected output:
+# Hi YOUR_USERNAME! You've successfully authenticated, but GitHub does not provide shell access.
+```
+
+**If you see an error:**
+```bash
+# Add GitHub to known hosts
+ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+# Try again
+ssh -T git@github.com
+```
+
+---
+
+### Step 2: Create GitHub Repository
 
 ```bash
 # 1. Go to GitHub.com and create a new repository
 # Name: github-actions-practice
-# Visibility: Public
+# Visibility: Public or Private (SSH works for both!)
 # Initialize: Add README
 
-# 2. Clone the repository
-git clone https://github.com/YOUR_USERNAME/github-actions-practice.git
+# 2. Clone the repository using SSH
+git clone git@github.com:YOUR_USERNAME/github-actions-practice.git
+# Example: git clone git@github.com:sarowar-alam/github-actions-practice.git
+
 cd github-actions-practice
 
 # 3. Verify Git configuration
 git config user.name
 git config user.email
+
+# If not set, configure them:
+git config --global user.name "Your Name"
+git config --global user.email "your_email@example.com"
 ```
 
-### Step 2: Verify GitHub Actions is Enabled
+**Alternative: Convert Existing HTTPS Clone to SSH**
+```bash
+# If you already cloned with HTTPS, switch to SSH
+cd github-actions-practice
+git remote set-url origin git@github.com:YOUR_USERNAME/github-actions-practice.git
+
+# Verify the change
+git remote -v
+# Should show: git@github.com:YOUR_USERNAME/github-actions-practice.git
+```
+
+---
+
+### Step 3: Verify GitHub Actions is Enabled
 
 1. Go to your repository on GitHub
 2. Click **Settings** → **Actions** → **General**
 3. Ensure "Allow all actions and reusable workflows" is selected
 4. Save changes
 
-### Step 3: Set Up Local Environment
+---
+
+### Step 4: Set Up Local Environment
 
 ```bash
 # Install Node.js (if not already installed)
@@ -166,15 +269,77 @@ Test manual run:
 
 **Goal:** Automate testing for a Node.js project
 
+---
+
+### 📖 What's Happening in This Exercise?
+
+**The Big Picture:**  
+You're creating an automated testing system that runs **every time you push code** to GitHub. Instead of manually running `npm test` on your laptop, GitHub Actions does it automatically in the cloud—testing your code on multiple Node.js versions simultaneously.
+
+**Real-World Scenario:**  
+Imagine you're working on a team project. You write some code, push it to GitHub, and before your teammate reviews it, the CI pipeline:
+1. ✅ Automatically downloads your code
+2. ✅ Installs all dependencies
+3. ✅ Runs all tests on Node.js 18 and 20
+4. ✅ Reports pass/fail within seconds
+5. ✅ Prevents broken code from being merged
+
+**What You're Building:**
+
+```
+Your Code Push
+      ↓
+GitHub detects push
+      ↓
+Triggers GitHub Actions Workflow
+      ↓
+┌─────────────────────────────────────┐
+│  Cloud Runner (Ubuntu VM)           │
+│  ┌─────────────┐  ┌─────────────┐  │
+│  │  Node 18.x  │  │  Node 20.x  │  │
+│  │  Run Tests  │  │  Run Tests  │  │
+│  │     ✓ 5/5   │  │     ✓ 5/5   │  │
+│  └─────────────┘  └─────────────┘  │
+└─────────────────────────────────────┘
+      ↓
+✅ All Tests Passed! (or ❌ Tests Failed!)
+      ↓
+Green checkmark appears on your commit
+```
+
+**Key Concepts You'll Learn:**
+
+1. **Continuous Integration (CI):** Automatically test code changes
+2. **Matrix Strategy:** Test on multiple Node.js versions simultaneously
+3. **Dependency Caching:** Speed up builds by caching `node_modules`
+4. **npm ci vs npm install:** Reproducible builds with lock files
+5. **Artifacts & Outputs:** See test results in GitHub Actions logs
+
+**The Flow Step-by-Step:**
+
+| Step | What You Do | What Happens |
+|------|-------------|--------------|
+| 1-6  | Create calculator code + tests locally | You write the code that needs testing |
+| 7    | Create `.github/workflows/nodejs-test.yml` | Define automation rules |
+| 8    | Push to GitHub | Trigger the magic! |
+| 9    | Watch Actions tab | See tests run automatically in the cloud |
+
+**After This Exercise:**  
+Every push to GitHub will automatically run your tests. No manual work. No "it works on my machine" problems. Just automated quality checks!
+
+---
+
 ### Step 1: Create Project Structure
 
 ```bash
-# Create project directory
-mkdir nodejs-testing-demo
-cd nodejs-testing-demo
+# Navigate to your repository root
+cd github-actions-practice
 
-# Initialize Node.js project
+# Initialize Node.js project in the root directory
 npm init -y
+
+# This creates package.json in the root
+# Note: We're NOT creating a subdirectory - keep files in root for GitHub Actions
 ```
 
 ### Step 2: Install Testing Framework
@@ -183,8 +348,14 @@ npm init -y
 # Install Jest for testing
 npm install --save-dev jest
 
+# This creates package-lock.json automatically
+# IMPORTANT: package-lock.json is required for GitHub Actions caching
+
 # Verify installation
 npm list jest
+
+# Verify package-lock.json was created
+ls -la package-lock.json
 ```
 
 ### Step 3: Create Calculator Module
@@ -292,6 +463,22 @@ npm test
 
 Create file: `.github/workflows/nodejs-test.yml`
 
+**Important:** Make sure your project structure looks like this:
+```
+github-actions-practice/
+├── .github/
+│   └── workflows/
+│       ├── hello-world.yml
+│       └── nodejs-test.yml      ← New file
+├── calculator.js                 ← In root directory
+├── calculator.test.js            ← In root directory
+├── package.json                  ← In root directory
+├── package-lock.json            ← In root directory (must be committed!)
+└── README.md
+```
+
+**Workflow content:**
+
 ```yaml
 name: Node.js CI Testing
 
@@ -335,16 +522,32 @@ jobs:
         run: echo "Tests completed for Node.js ${{ matrix.node-version }}"
 ```
 
-### Step 8: Commit and Push
+### Step 8: Clean Up and Commit
 
 ```bash
-# Add all files
+# If you accidentally created nodejs-testing-demo subdirectory, remove it
+rm -rf nodejs-testing-demo
+
+# Add all files (including package-lock.json!)
 git add .
+
+# Verify package-lock.json is included and no subdirectory exists
+git status
+# Should show: calculator.js, calculator.test.js, package.json, package-lock.json
+# Should NOT show: nodejs-testing-demo/
 
 # Commit
 git commit -m "Add Node.js testing pipeline"
 
 # Push
+git push origin main
+```
+
+**Note:** If you see duplicate test results (tests running from both root and subdirectory), clean up the subdirectory:
+```bash
+rm -rf nodejs-testing-demo
+git add .
+git commit -m "Remove duplicate subdirectory"
 git push origin main
 ```
 
@@ -359,6 +562,68 @@ git push origin main
 - ✅ 2 jobs run (Node.js 18.x and 20.x)
 - ✅ All tests pass in both versions
 - ✅ Green checkmark on workflow
+
+**Detailed Success Indicators:**
+
+**1. Workflow Summary:**
+```
+✓ test (18.x) completed in 12s
+✓ test (20.x) completed in 14s
+```
+
+**2. Test Output (each job shows):**
+```
+Run npm test
+
+PASS ./calculator.test.js
+  Calculator Functions
+    ✓ adds 2 + 3 to equal 5 (2 ms)
+    ✓ subtracts 5 - 3 to equal 2 (1 ms)
+    ✓ multiplies 4 * 5 to equal 20
+    ✓ divides 10 / 2 to equal 5
+    ✓ throws error when dividing by zero (1 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       5 passed, 5 total
+Snapshots:   0 total
+Time:        0.541 s
+```
+
+**3. Cache Performance:**
+```
+Cache restored successfully
+Cache Size: ~2-5 MB
+Cache saved successfully
+```
+
+**4. Full Workflow Steps (each job):**
+```
+✓ Checkout Repository       (1s)
+✓ Setup Node.js 18.x/20.x   (1s)
+✓ Install Dependencies       (5s)
+✓ Run Tests                  (2s)
+✓ Test Summary              (1s)
+✓ Post Setup Node.js        (1s)
+✓ Complete job              (1s)
+```
+
+**5. Final Validation Checklist:**
+- [ ] Workflow badge shows passing (green)
+- [ ] Both Node.js versions tested successfully
+- [ ] No errors in any step
+- [ ] All 5 calculator tests pass
+- [ ] Cache is working (faster subsequent runs)
+- [ ] Test output is clean (no warnings)
+- [ ] Commit shows green checkmark on GitHub
+
+**6. What You've Accomplished:**
+- ✅ Set up automated testing with GitHub Actions
+- ✅ Configured multi-version testing (Node.js 18.x, 20.x)
+- ✅ Implemented dependency caching for faster builds
+- ✅ Created a maintainable test suite
+- ✅ Established CI pipeline that runs on every push
+
+**Next:** If all checks pass, you're ready for Exercise 3! If you see any warnings about duplicate tests, ensure you've completed the cleanup step (Step 8).
 
 ---
 
@@ -575,7 +840,58 @@ Run manually and verify secret is accessible but masked in logs.
 
 ## 🐛 Troubleshooting
 
-### Issue 1: Workflow Not Triggering
+### Issue 1: Dependencies Lock File Not Found
+
+**Problem:** Error message: `Dependencies lock file is not found... Supported file patterns: package-lock.json`
+
+**Cause:** The workflow uses `cache: 'npm'` but `package-lock.json` is missing
+
+**Solutions:**
+
+**Option 1: Generate and commit package-lock.json (Recommended)**
+```bash
+# Generate lock file
+npm install
+
+# Verify it was created
+ls -la package-lock.json
+
+# Add and commit it
+git add package-lock.json
+git commit -m "Add package-lock.json for CI caching"
+git push origin main
+```
+
+**Option 2: Remove cache from workflow**
+```yaml
+# In .github/workflows/nodejs-test.yml
+# Remove or comment out the cache line:
+- name: Setup Node.js ${{ matrix.node-version }}
+  uses: actions/setup-node@v4
+  with:
+    node-version: ${{ matrix.node-version }}
+    # cache: 'npm'  # Comment this out
+```
+
+**Option 3: Use npm install instead of npm ci**
+```yaml
+# Change this:
+- name: Install Dependencies
+  run: npm ci
+
+# To this:
+- name: Install Dependencies
+  run: npm install
+```
+
+**Why this happens:**
+- `npm ci` requires `package-lock.json` for reproducible builds
+- GitHub Actions cache feature needs lock file to determine cache key
+- If you used `npm install` locally without committing the lock file, CI will fail
+
+---
+
+### Issue 2: Workflow Not Triggering
 
 **Problem:** Workflow doesn't run after push
 
@@ -593,24 +909,72 @@ ls .github/workflows/*.yml
 git branch --show-current
 ```
 
-### Issue 2: npm ci Fails
+### Issue 3: package.json and package-lock.json Out of Sync
+
+**Problem:** Error: `npm ci can only install packages when your package.json and package-lock.json are in sync`
+
+**Example Error:**
+```
+Invalid: lock file's jest@30.2.0 does not satisfy jest@29.7.0
+```
+
+**Cause:** Version mismatch between package.json and package-lock.json
+
+**Solution (Run locally):**
+```bash
+# Navigate to your repository
+cd github-actions-practice
+
+# Delete the out-of-sync lock file
+rm package-lock.json
+
+# Regenerate lock file based on package.json
+npm install
+
+# Verify versions match
+cat package.json | grep jest
+cat package-lock.json | grep '"version"' | head -5
+
+# Commit the new lock file
+git add package-lock.json
+git commit -m "Fix: Regenerate package-lock.json to match package.json"
+git push origin main
+```
+
+**Why this happens:**
+- You ran `npm install` which upgraded Jest to 30.x
+- But package.json still specifies 29.x
+- `npm ci` requires exact version match for reproducible builds
+
+---
+
+### Issue 4: npm ci Fails (General)
 
 **Problem:** `npm ci` command fails in workflow
 
 **Solutions:**
 ```yaml
-# Use npm install instead
+# Solution 1: Use npm install instead
 - name: Install Dependencies
   run: npm install
 
-# Or delete package-lock.json and regenerate
+# Solution 2: Regenerate lock file in CI
 - name: Install Dependencies
   run: |
     rm -f package-lock.json
     npm install
+
+# Solution 3: Use exact npm version
+- name: Setup Node.js
+  uses: actions/setup-node@v4
+  with:
+    node-version: '20.x'
+- name: Install Dependencies
+  run: |
+    npm ci --legacy-peer-deps
 ```
 
-### Issue 3: Tests Fail in CI but Pass Locally
+### Issue 5: Tests Fail in CI but Pass Locally
 
 **Problem:** Tests pass locally but fail in GitHub Actions
 
@@ -631,7 +995,7 @@ git branch --show-current
     node-version: '18.17.0'  # Specific version
 ```
 
-### Issue 4: Permission Denied
+### Issue 6: Permission Denied
 
 **Problem:** Workflow fails with permission errors
 
@@ -650,7 +1014,7 @@ jobs:
     runs-on: ubuntu-latest
 ```
 
-### Issue 5: Workflow Runs Too Long
+### Issue 7: Workflow Runs Too Long
 
 **Problem:** Workflow exceeds time limits
 
