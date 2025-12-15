@@ -5,9 +5,16 @@
 ---
 
 ## Overview
-A full-stack 3-tier web application for tracking Body Mass Index (BMI), Basal Metabolic Rate (BMR), and daily calorie requirements. The application features trend visualization and stores historical measurement data.
+A full-stack 3-tier web application for tracking Body Mass Index (BMI), Basal Metabolic Rate (BMR), and daily calorie requirements. The application features trend visualization, custom measurement dates for historical data entry, and stores all measurement data in PostgreSQL.
 
 **Deployment Target**: Single Ubuntu EC2 server
+
+**Key Features**:
+- Health metrics calculation (BMI, BMR, Daily Calories)
+- Custom measurement dates for entering past data
+- 30-day BMI trend visualization
+- Historical data tracking
+- Production-ready deployment with automated script
 
 ---
 
@@ -32,10 +39,13 @@ bmi-health-tracker/
 ├── CONNECTIVITY.md
 ├── DEPLOYMENT_CHECKLIST.md
 ├── DEPLOYMENT_READY.md
+├── IMPLEMENTATION_GUIDE.md
 ├── FINAL_AUDIT.md
 ├── BMI_Health_Tracker_Deployment_Readme.md
+├── DevOpsReadme.md
 ├── deploy.sh
 ├── setup-database.sh
+├── IMPLEMENTATION_AUTO.sh (automated deployment)
 │
 ├── backend/
 │   ├── src/
@@ -44,7 +54,8 @@ bmi-health-tracker/
 │   │   ├── db.js
 │   │   └── calculations.js
 │   ├── migrations/
-│   │   └── 001_create_measurements.sql
+│   │   ├── 001_create_measurements.sql
+│   │   └── 002_add_measurement_date.sql
 │   ├── .env.example
 │   ├── ecosystem.config.js
 │   └── package.json
@@ -187,7 +198,7 @@ const { calculateMetrics } = require('./calculations');
 // POST /api/measurements - Create new measurement
 router.post('/measurements', async (req, res) => {
   try {
-    const { weightKg, heightCm, age, sex, activity } = req.body;
+    const { weightKg, heightCm, age, sex, activity, measurementDate } = req.body;
     
     // Validation
     if (!weightKg || !heightCm || !age || !sex) {
@@ -198,9 +209,11 @@ router.post('/measurements', async (req, res) => {
     }
     
     const m = calculateMetrics({ weightKg, heightCm, age, sex, activity });
-    const q = `INSERT INTO measurements (weight_kg,height_cm,age,sex,activity_level,bmi,bmi_category,bmr,daily_calories,created_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now()) RETURNING *`;
-    const v = [weightKg, heightCm, age, sex, activity, m.bmi, m.bmiCategory, m.bmr, m.dailyCalories];
+    // Use provided date or default to today
+    const date = measurementDate || new Date().toISOString().split('T')[0];
+    const q = `INSERT INTO measurements (weight_kg,height_cm,age,sex,activity_level,bmi,bmi_category,bmr,daily_calories,measurement_date,created_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now()) RETURNING *`;
+    const v = [weightKg, heightCm, age, sex, activity, m.bmi, m.bmiCategory, m.bmr, m.dailyCalories, date];
     const r = await db.query(q, v);
     res.status(201).json({ measurement: r.rows[0] });
   } catch (e) {
@@ -209,10 +222,10 @@ router.post('/measurements', async (req, res) => {
   }
 });
 
-// GET /api/measurements - Get all measurements
+// GET /api/measurements - Get all measurements (ordered by measurement_date)
 router.get('/measurements', async (req, res) => {
   try {
-    const r = await db.query('SELECT * FROM measurements ORDER BY created_at DESC');
+    const r = await db.query('SELECT * FROM measurements ORDER BY measurement_date DESC, created_at DESC');
     res.json({ rows: r.rows });
   } catch (e) {
     console.error('Error fetching measurements:', e);
@@ -220,14 +233,14 @@ router.get('/measurements', async (req, res) => {
   }
 });
 
-// GET /api/measurements/trends - Get 30-day BMI trends
+// GET /api/measurements/trends - Get 30-day BMI trends (using measurement_date)
 router.get('/measurements/trends', async (req, res) => {
   try {
-    const q = `SELECT date_trunc('day',created_at) AS day, AVG(bmi) AS avg_bmi 
+    const q = `SELECT measurement_date AS day, AVG(bmi) AS avg_bmi 
     FROM measurements
-    WHERE created_at > now() - interval '30 days' 
-    GROUP BY day 
-    ORDER BY day`;
+    WHERE measurement_date >= CURRENT_DATE - interval '30 days' 
+    GROUP BY measurement_date 
+    ORDER BY measurement_date`;
     const r = await db.query(q);
     res.json({ rows: r.rows });
   } catch (e) {
@@ -381,7 +394,45 @@ COMMENT ON COLUMN measurements.bmr IS 'Basal Metabolic Rate in calories';
 COMMENT ON COLUMN measurements.daily_calories IS 'Daily calorie needs based on activity';
 
 -- Display confirmation
-SELECT 'Migration 001 completed successfully - measurements table created' AS status```
+SELECT 'Migration 001 completed successfully - measurements table created' AS status;
+```
+
+#### backend/migrations/002_add_measurement_date.sql
+```sql
+-- BMI Health Tracker Database Migration
+-- Version: 002
+-- Description: Add measurement_date column for custom date tracking
+-- Date: 2025-12-15
+
+-- Add measurement_date column if it doesn't exist
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name='measurements' AND column_name='measurement_date'
+    ) THEN
+        ALTER TABLE measurements 
+        ADD COLUMN measurement_date DATE NOT NULL DEFAULT CURRENT_DATE;
+        
+        -- Update existing records to use created_at date
+        UPDATE measurements 
+        SET measurement_date = DATE(created_at);
+        
+        -- Create index for better performance
+        CREATE INDEX idx_measurements_measurement_date ON measurements(measurement_date DESC);
+        
+        RAISE NOTICE 'Column measurement_date added successfully';
+    ELSE
+        RAISE NOTICE 'Column measurement_date already exists';
+    END IF;
+END $$;
+
+-- Add comment
+COMMENT ON COLUMN measurements.measurement_date IS 'Date when the measurement was taken (user-specified or current date)';
+
+-- Display confirmation
+SELECT 'Migration 002 completed successfully - measurement_date column added' AS status;
+```
 
 ---
 
@@ -589,7 +640,7 @@ export default function App() {
                 rows.slice(0, 10).map(r => (
                   <li key={r.id} className="measurement-item">
                     <span className="measurement-date">
-                      {new Date(r.created_at).toLocaleDateString('en-US', { 
+                      {new Date(r.measurement_date || r.created_at).toLocaleDateString('en-US', { 
                         month: 'short', 
                         day: 'numeric', 
                         year: 'numeric' 
@@ -634,7 +685,15 @@ import React, { useState } from 'react';
 import api from '../api';
 
 export default function MF({ onSaved }) {
-  const [f, sf] = useState({ weightKg: 70, heightCm: 175, age: 30, sex: 'male', activity: 'moderate' });
+  const getTodayDate = () => new Date().toISOString().split('T')[0];
+  const [f, sf] = useState({ 
+    weightKg: 70, 
+    heightCm: 175, 
+    age: 30, 
+    sex: 'male', 
+    activity: 'moderate',
+    measurementDate: getTodayDate()
+  });
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -660,6 +719,20 @@ export default function MF({ onSaved }) {
     <form onSubmit={sub}>
       {error && <div className="alert alert-error">{error}</div>}
       {success && <div className="alert alert-success">Measurement saved successfully!</div>}
+      
+      <div className="form-row">
+        <div className="form-group">
+          <label htmlFor="measurementDate">Measurement Date</label>
+          <input 
+            id="measurementDate"
+            type="date"
+            value={f.measurementDate} 
+            onChange={e => sf({ ...f, measurementDate: e.target.value })}
+            required
+            max={new Date().toISOString().split('T')[0]}
+          />
+        </div>
+      </div>
       
       <div className="form-row">
         <div className="form-group">
@@ -1769,9 +1842,19 @@ sudo tail -f /var/log/nginx/bmi-error.log
 
 ---
 
-**Last Updated:** December 12, 2025  
-**Version:** 3.0 - Complete Reconstruction Edition  
-**Status:** ✅ Production Ready - Can recreate entire project from this fileheight_cm       NUMERIC NOT NULL
+**Last Updated:** December 15, 2025  
+**Version:** 4.0 - Complete with Measurement Date Feature  
+**Status:** ✅ Production Ready - Can recreate entire project from this file
+
+---
+
+## Database Schema
+
+### measurements table
+```sql
+id              SERIAL PRIMARY KEY
+weight_kg       NUMERIC NOT NULL
+height_cm       NUMERIC NOT NULL
 age             INTEGER NOT NULL
 sex             VARCHAR(10) NOT NULL
 activity_level  VARCHAR(30)
@@ -1779,6 +1862,7 @@ bmi             NUMERIC NOT NULL
 bmi_category    VARCHAR(30)
 bmr             INTEGER
 daily_calories  INTEGER
+measurement_date DATE NOT NULL DEFAULT CURRENT_DATE
 created_at      TIMESTAMPTZ DEFAULT now()
 ```
 
@@ -1788,15 +1872,16 @@ created_at      TIMESTAMPTZ DEFAULT now()
 
 ### POST `/api/measurements`
 Create a new measurement
-- **Body**: `{ weightKg, heightCm, age, sex, activity }`
+- **Body**: `{ weightKg, heightCm, age, sex, activity, measurementDate? }`
+  - `measurementDate` is optional, defaults to current date
 - **Response**: `{ measurement: {...} }`
 
 ### GET `/api/measurements`
-Get all measurements (newest first)
+Get all measurements (ordered by measurement_date DESC, then created_at DESC)
 - **Response**: `{ rows: [...] }`
 
 ### GET `/api/measurements/trends`
-Get 30-day average BMI by day
+Get 30-day average BMI by day (based on measurement_date)
 - **Response**: `{ rows: [{ day, avg_bmi }] }`
 
 ---
@@ -1815,6 +1900,7 @@ npm install
 cp .env.example .env
 # Edit .env with your DATABASE_URL
 psql -U postgres -f migrations/001_create_measurements.sql
+psql -U postgres -f migrations/002_add_measurement_date.sql
 npm run dev  # Runs on port 3000
 ```
 

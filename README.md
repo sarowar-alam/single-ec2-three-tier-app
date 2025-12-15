@@ -33,8 +33,9 @@ BMI & Health Tracker is a comprehensive health monitoring application that helps
 
 2. **Tracks Progress:**
    - Stores all measurements in a PostgreSQL database
+   - Custom measurement dates for entering historical data
    - Displays 30-day BMI trends with interactive charts
-   - Provides historical view of all measurements
+   - Provides historical view of all measurements with dates
 
 3. **Provides Insights:**
    - Color-coded BMI categories (Underweight, Normal, Overweight, Obese)
@@ -50,6 +51,7 @@ User Input → Frontend Validation → API Request → Backend Processing → Da
 ```
 
 1. **User enters data** in the measurement form:
+   - Measurement Date (defaults to today, can select past dates)
    - Height (cm), Weight (kg), Age, Gender, Activity Level
 
 2. **Frontend validates** inputs and sends POST request to `/api/measurements`
@@ -352,6 +354,7 @@ sudo -u postgres createdb -O bmi_user bmidb
 # Run migrations
 cd backend
 psql -U bmi_user -d bmidb -h localhost -f migrations/001_create_measurements.sql
+psql -U bmi_user -d bmidb -h localhost -f migrations/002_add_measurement_date.sql
 ```
 
 #### 3. Backend Setup
@@ -440,6 +443,7 @@ GET /api/measurements
     "bmi_category": "Normal",
     "bmr": 1680,
     "daily_calories": 2604,
+    "measurement_date": "2025-12-15",
     "created_at": "2025-12-15T10:30:00.000Z"
   }
 ]
@@ -466,7 +470,8 @@ Content-Type: application/json
   "weight": 70,
   "age": 30,
   "gender": "male",
-  "activity_level": "moderately"
+  "activity_level": "moderately",
+  "measurementDate": "2025-12-15"  // Optional: defaults to current date
 }
 ```
 
@@ -495,6 +500,7 @@ Content-Type: application/json
   "bmi_category": "Normal",
   "bmr": 1680,
   "daily_calories": 2604,
+  "measurement_date": "2025-12-15",
   "created_at": "2025-12-15T10:30:00.000Z"
 }
 ```
@@ -584,11 +590,13 @@ CREATE TABLE measurements (
     bmi_category VARCHAR(20) NOT NULL,      -- BMI category
     bmr INTEGER NOT NULL,                   -- Calculated BMR
     daily_calories INTEGER NOT NULL,        -- Calculated daily calories
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    measurement_date DATE NOT NULL DEFAULT CURRENT_DATE,  -- Date of measurement
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP        -- Record creation time
 );
 
 -- Index for faster date-based queries
 CREATE INDEX idx_measurements_created_at ON measurements(created_at DESC);
+CREATE INDEX idx_measurements_measurement_date ON measurements(measurement_date DESC);
 ```
 
 ### Field Descriptions
@@ -605,6 +613,7 @@ CREATE INDEX idx_measurements_created_at ON measurements(created_at DESC);
 | bmi_category | VARCHAR(20) | NOT NULL | One of: Underweight, Normal, Overweight, Obese |
 | bmr | INTEGER | NOT NULL | Calculated Basal Metabolic Rate (calories/day) |
 | daily_calories | INTEGER | NOT NULL | Calculated daily calorie needs |
+| measurement_date | DATE | NOT NULL, DEFAULT CURRENT_DATE | Date when measurement was taken |
 | created_at | TIMESTAMP | DEFAULT NOW() | Record creation timestamp |
 
 ### Database Queries
@@ -614,23 +623,23 @@ The application uses the following queries:
 **Get All Measurements:**
 ```sql
 SELECT * FROM measurements 
-ORDER BY created_at DESC;
+ORDER BY measurement_date DESC, created_at DESC;
 ```
 
 **Insert Measurement:**
 ```sql
 INSERT INTO measurements (
   height, weight, age, gender, activity_level,
-  bmi, bmi_category, bmr, daily_calories
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+  bmi, bmi_category, bmr, daily_calories, measurement_date
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING *;
 ```
 
 **Get Recent Measurements (for trend chart):**
 ```sql
 SELECT * FROM measurements 
-WHERE created_at >= NOW() - INTERVAL '30 days'
-ORDER BY created_at ASC;
+WHERE measurement_date >= CURRENT_DATE - INTERVAL '30 days'
+ORDER BY measurement_date ASC;
 ```
 
 ## 📦 Deployment
@@ -973,6 +982,7 @@ relation "measurements" does not exist
 # Run migrations manually
 cd backend
 psql -U bmi_user -d bmidb -h localhost -f migrations/001_create_measurements.sql
+psql -U bmi_user -d bmidb -h localhost -f migrations/002_add_measurement_date.sql
 
 # Verify table exists
 psql -U bmi_user -d bmidb -h localhost -c "\dt"
